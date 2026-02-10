@@ -26,14 +26,15 @@ jobs:
           fetch-depth: 0
 
       - name: Get PR Info
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUM_INPUT: ${{ github.event.pull_request.number }}
+          PR_AUTHOR_INPUT: ${{ github.event.pull_request.user.login }}
+          BASE_INPUT: ${{ github.event.pull_request.base.ref }}
         run: |
-          export PR_NUM="${{ github.event.pull_request.number }}"
-          export PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-          export BASE="${{ github.event.pull_request.base.ref }}"
-          
-          echo "PR_NUM=$PR_NUM" >> $GITHUB_ENV
-          echo "PR_AUTHOR=$PR_AUTHOR" >> $GITHUB_ENV
-          echo "BASE=$BASE" >> $GITHUB_ENV
+          echo "PR_NUM=$PR_NUM_INPUT" >> $GITHUB_ENV
+          echo "PR_AUTHOR=$PR_AUTHOR_INPUT" >> $GITHUB_ENV
+          echo "BASE=$BASE_INPUT" >> $GITHUB_ENV
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -156,7 +157,7 @@ jobs:
               export FINDINGS=$((FINDINGS + 1))
             done
             
-            setState inside build
+            # setState inside build
             if grep -q "build.*Context.*context" "$file" 2>/dev/null; then
               grep -nE "setState.*=>" "$file" 2>/dev/null | head -3 | while read match; do
                 export L=$(echo "$match" | cut -d: -f1)

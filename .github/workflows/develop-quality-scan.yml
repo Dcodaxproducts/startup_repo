@@ -34,17 +34,21 @@ jobs:
 
       - name: Get Changed Files
         run: |
-          export CHANGED=$(git diff --name-only HEAD~1 HEAD -- '*.dart' 2>/dev/null | head -50)
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- '*.dart' 2>/dev/null | head -50 || true)
           echo "$CHANGED" > /tmp/changed_files.txt
-          export COUNT=$(echo "$CHANGED" | grep -c . 2>/dev/null || echo "0")
+          if [ -z "$CHANGED" ]; then
+            COUNT=0
+          else
+            COUNT=$(echo "$CHANGED" | wc -l | tr -d ' ')
+          fi
           echo "CHANGED_COUNT=$COUNT" >> $GITHUB_ENV
 
       - name: Check Code Quality
         run: |
           flutter pub get
           flutter analyze --no-fatal-infos > /tmp/analyze.txt 2>&1 || true
-          export ERRORS=$(grep -c "error" /tmp/analyze.txt 2>/dev/null || echo "0")
-          export WARNINGS=$(grep -c "warning" /tmp/analyze.txt 2>/dev/null || echo "0")
+          ERRORS=$(grep -c "error" /tmp/analyze.txt 2>/dev/null || echo "0")
+          WARNINGS=$(grep -c "warning" /tmp/analyze.txt 2>/dev/null || echo "0")
           echo "ERRORS=$ERRORS" >> $GITHUB_ENV
           echo "WARNINGS=$WARNINGS" >> $GITHUB_ENV
 
@@ -53,16 +57,16 @@ jobs:
           flutter test --coverage 2>&1 || true
           if [ -f "coverage/lcov.info" ]; then
             sudo apt-get update -qq && sudo apt-get install -y lcov -qq
-            export COV=$(lcov --summary coverage/lcov.info 2>&1 | grep "lines" | awk '{print $2}' | sed 's/%//' | head -1)
-            echo "COVERAGE=$COV" >> $GITHUB_ENV
+            COV=$(lcov --summary coverage/lcov.info 2>&1 | grep "lines" | awk '{print $2}' | sed 's/%//' | head -1)
+            echo "COVERAGE=${COV:-0}" >> $GITHUB_ENV
           else
             echo "COVERAGE=0" >> $GITHUB_ENV
           fi
 
       - name: Check for Secrets
         run: |
-          export FOUND=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | while read f; do [ -f "$f" ] && grep -ilE "password|secret|token|key" "$f" 2>/dev/null; done | wc -l | xargs)
-          echo "SECRETS_FOUND=$FOUND" >> $GITHUB_ENV
+          FOUND=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | while read f; do [ -f "$f" ] && grep -ilE "password|secret|token|key" "$f" 2>/dev/null; done | wc -l | tr -d ' ')
+          echo "SECRETS_FOUND=${FOUND:-0}" >> $GITHUB_ENV
 
       - name: Post Results to Mattermost
         if: always()

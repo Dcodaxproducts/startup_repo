@@ -54,12 +54,12 @@ jobs:
           cat > /tmp/categorize.sh << 'SCRIPT_EOF'
           #!/bin/bash
           # Extract packages with version info
-          jq -r '.packages[] | "\(.package)\t\(.current // "0.0.0")\t\(.upgradable // "0.0.0")\t\(.latest // "0.0.0")"' outdated.json | while IFS=$'\t' read -r pkg cur upg lat; do
+          jq -r '.packages[] | "\(.package)\t\(.current.version // "0.0.0")\t\(.upgradable.version // "0.0.0")\t\(.latest.version // "0.0.0")"' outdated.json | while IFS=$'\t' read -r pkg cur upg lat; do
             [ "$upg" = "null" ] || [ -z "$upg" ] && upg="0.0.0"
             [ "$cur" = "null" ] || [ -z "$cur" ] && continue
 
             # Skip if no upgrade available
-            [ "$upg" = "$cur" ] && [ "$lat" != "$cur" ] && [ "$lat" != "null" ] && echo "blocked	$pkg: $cur → (blocked)	(latest: $lat)" && continue
+            [ "$upg" = "$cur" ] && [ "$lat" != "$cur" ] && [ "$lat" != "null" ] && echo "blocked|$pkg: $cur → (blocked)|(latest: $lat)" && continue
             [ "$upg" = "$cur" ] && continue
 
             # Parse versions
@@ -69,21 +69,21 @@ jobs:
             UPG_MIN=$(echo "$upg" | cut -d. -f2)
 
             if [ "$CUR_MAJ" != "$UPG_MAJ" ]; then
-              echo "major	$pkg: $cur → $upg	(latest: $lat)"
+              echo "major|$pkg: $cur → $upg|(latest: $lat)"
             elif [ "$CUR_MIN" != "$UPG_MIN" ]; then
-              echo "minor	$pkg: $cur → $upg	(latest: $lat)"
+              echo "minor|$pkg: $cur → $upg|(latest: $lat)"
             else
-              echo "patch	$pkg: $cur → $upg	(latest: $lat)"
+              echo "patch|$pkg: $cur → $upg|(latest: $lat)"
             fi
           done
           SCRIPT_EOF
           chmod +x /tmp/categorize.sh
           bash /tmp/categorize.sh > /tmp/updates.tsv
 
-          awk -F'\t' '$1=="patch"{print $2}' /tmp/updates.tsv > /tmp/patch_updates.txt || true
-          awk -F'\t' '$1=="minor"{print $2}' /tmp/updates.tsv > /tmp/minor_updates.txt || true
-          awk -F'\t' '$1=="major"{print $2}' /tmp/updates.tsv > /tmp/major_updates.txt || true
-          awk -F'\t' '$1=="blocked"{print $2 " " $3}' /tmp/updates.tsv > /tmp/blocked_updates.txt || true
+          awk -F'|' '$1=="patch"{print $2}' /tmp/updates.tsv > /tmp/patch_updates.txt || true
+          awk -F'|' '$1=="minor"{print $2}' /tmp/updates.tsv > /tmp/minor_updates.txt || true
+          awk -F'|' '$1=="major"{print $2}' /tmp/updates.tsv > /tmp/major_updates.txt || true
+          awk -F'|' '$1=="blocked"{print $2 " " $3}' /tmp/updates.tsv > /tmp/blocked_updates.txt || true
 
           export PATCH_COUNT=$(grep -c "→" /tmp/patch_updates.txt 2>/dev/null || echo "0")
           export MINOR_COUNT=$(grep -c "→" /tmp/minor_updates.txt 2>/dev/null || echo "0")

@@ -80,26 +80,32 @@ jobs:
         run: flutter build appbundle --release
 
       - name: Rename and Upload
+        continue-on-error: true
         run: |
-          export REPO_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f2)
-          export VERSION=$(grep "version:" pubspec.yaml | sed 's/version: *//' | xargs)
-          export BUILD_NUM=$(echo "$GITHUB_SHA" | cut -c1-7)
+          REPO_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f2)
+          VERSION=$(grep "version:" pubspec.yaml | sed 's/version: *//' | xargs)
+          BUILD_NUM=$(echo "$GITHUB_SHA" | cut -c1-7)
           
-          export APK_SRC="build/app/outputs/flutter-apk/app-release.apk"
-          export AAB_SRC="build/app/outputs/bundle/release/app-release.aab"
+          APK_SRC="build/app/outputs/flutter-apk/app-release.apk"
+          AAB_SRC="build/app/outputs/bundle/release/app-release.aab"
           
-          export APK_NAME="${REPO_NAME}_v${VERSION}+${BUILD_NUM}_android.apk"
-          export AAB_NAME="${REPO_NAME}_v${VERSION}+${BUILD_NUM}_android.aab"
+          APK_NAME="${REPO_NAME}_v${VERSION}+${BUILD_NUM}_android.apk"
+          AAB_NAME="${REPO_NAME}_v${VERSION}+${BUILD_NUM}_android.aab"
           
           mv "$APK_SRC" "$APK_NAME"
           mv "$AAB_SRC" "$AAB_NAME"
           
-          echo "Uploading to S3..."
-          aws s3 cp "$APK_NAME" "s3://${AWS_BUCKET_NAME}/builds/android/" --acl private
-          aws s3 cp "$AAB_NAME" "s3://${AWS_BUCKET_NAME}/builds/android/" --acl private
-          
-          echo "APK: s3://${AWS_BUCKET_NAME}/builds/android/${APK_NAME}"
-          echo "AAB: s3://${AWS_BUCKET_NAME}/builds/android/${AAB_NAME}"
+          if [ -z "$AWS_BUCKET_NAME" ]; then
+            echo "⚠️ AWS_BUCKET_NAME not set — skipping S3 upload"
+            echo "APK: $APK_NAME (local only)"
+            echo "AAB: $AAB_NAME (local only)"
+          else
+            echo "Uploading to S3..."
+            aws s3 cp "$APK_NAME" "s3://${AWS_BUCKET_NAME}/builds/android/" --acl private
+            aws s3 cp "$AAB_NAME" "s3://${AWS_BUCKET_NAME}/builds/android/" --acl private
+            echo "APK: s3://${AWS_BUCKET_NAME}/builds/android/${APK_NAME}"
+            echo "AAB: s3://${AWS_BUCKET_NAME}/builds/android/${AAB_NAME}"
+          fi
 
       - name: Post to Mattermost
         env:

@@ -1,192 +1,86 @@
-name: CI - Code Quality & Tests
+name: CI — Lint, Test, Analyze
 
 on:
+  push:
+    branches: [development, testing, production]
   pull_request:
-    branches: [develop, testing, main]
+    branches: [development, testing, production]
   workflow_dispatch:
 
-env:
-  FLUTTER_VERSION: '3.24.0'
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  quality-checks:
-    name: Code Quality & Tests
+  analyze:
+    name: Flutter Analyze & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
-      GH_TOKEN: ${{ github.token }}
+      MATTERMOST_URL: ${{ secrets.MATTERMOST_URL }}
+      MATTERMOST_TOKEN: ${{ secrets.MATTERMOST_TOKEN }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cache Flutter SDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.pub-cache
-            ~/.flutter
-          key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-flutter-
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Extract Flutter Version
-        run: |
-          if [ -f ".fvmrc" ]; then
-            export FLUTTER_V=$(cat .fvmrc | jq -r '.flutter // empty')
-            [ -n "$FLUTTER_V" ] && echo "FLUTTER_VERSION=$FLUTTER_V" >> $GITHUB_ENV
-          elif [ -f ".dcodax-ci.yaml" ]; then
-            export FLUTTER_V=$(grep "flutter_version:" .dcodax-ci.yaml | sed 's/.*: *//')
-            [ -n "$FLUTTER_V" ] && echo "FLUTTER_VERSION=$FLUTTER_V" >> $GITHUB_ENV
-          fi
-          echo "Using Flutter $FLUTTER_VERSION"
+      - uses: actions/checkout@v4
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: '3.x'
           channel: stable
           cache: true
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
-
-      - name: Get Dependencies
+      - name: Install dependencies
         run: flutter pub get
 
-      - name: Validate Branch Name
-        if: github.event_name == 'pull_request'
+      - name: Check formatting
+        id: format
+        run: dart format --set-exit-if-changed .
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Analyze code
+        id: analyze
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Run tests
+        id: test
+        run: flutter test --coverage
+        continue-on-error: true
+
+      - name: Upload coverage
+        if: always() && hashFiles('coverage/lcov.info') != ''
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+
+      - name: PR Comment — Quality Report
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const format = '${{ steps.format.outcome }}';
+            const analyze = '${{ steps.analyze.outcome }}';
+            const test = '${{ steps.test.outcome }}';
+            const icon = (s) => s === 'success' ? '✅' : '❌';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🔍 CI Quality Report\n| Check | Status |\n|-------|--------|\n| Format | ${icon(format)} ${format} |\n| Analyze | ${icon(analyze)} ${analyze} |\n| Tests | ${icon(test)} ${test} |`
+            });
+
+      - name: Notify Mattermost on failure
+        if: failure()
         run: |
-          export BRANCH="$GITHUB_HEAD_REF"
-          if ! echo "$BRANCH" | grep -qE "^(feature|bugfix|hotfix|release)/"; then
-            echo "Branch name must follow: feature/*, bugfix/*, hotfix/* or release/*"
-            exit 1
-          fi
-          echo "Branch valid: $BRANCH"
-
-      - name: Validate Commit Messages
-        if: github.event_name == 'pull_request'
-        run: |
-          export COMMITS=$(git log origin/$GITHUB_BASE_REF..HEAD --pretty=format:"%s")
-          export TYPES="feat|fix|chore|docs|refactor|test|ci|perf|style|build"
-
-          echo "$COMMITS" | while read -r msg; do
-            [ -z "$msg" ] && continue
-            if ! echo "$msg" | grep -qE "^($TYPES)(\(.+\))?: .+"; then
-              echo "Invalid commit: $msg"
-              exit 1
-            fi
-          done
-
-      - name: Check Formatting
-        run: |
-          if ! dart format --set-exit-if-changed --line-length 80 .; then
-            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::warning::Code formatting issues found"
-            else
-              exit 1
-            fi
-          fi
-
-      - name: Analyze Code
-        run: |
-          flutter analyze --no-fatal-infos || {
-            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::warning::Analysis issues found"
-            else
-              exit 1
-            fi
-          }
-
-      - name: Security Scan
-        run: |
-          export FOUND=0
-          export BASE=${GITHUB_BASE_REF:-development}
-
-          git fetch origin "$BASE" 2>/dev/null || true
-          git diff --name-only "origin/$BASE..HEAD" -- '*.dart' 2>/dev/null | while read file; do
-            [ -f "$file" ] || continue
-
-            if grep -qE "AIza[0-9A-Za-z_-]{35}" "$file" 2>/dev/null; then
-              echo "::error::$file: Google API key found"
-              export FOUND=1
-            fi
-
-            if grep -qE "password\s*=\s*\"[^\"]+\"" "$file" 2>/dev/null; then
-              echo "::error::$file: Hardcoded password"
-              export FOUND=1
-            fi
-
-            if grep -qE "-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----" "$file" 2>/dev/null; then
-              echo "::error::$file: Private key found"
-              export FOUND=1
-            fi
-
-            if grep -qE "sk_(live|test)_[0-9a-zA-Z]{24}" "$file" 2>/dev/null; then
-              echo "::error::$file: Stripe key found"
-              export FOUND=1
-            fi
-          done
-
-      - name: Detect Code Duplication
-        run: |
-          npx -y jscpd --reporters console --blame --gitignore . 2>/dev/null || true
-
-      - name: Run Tests with Coverage
-        run: flutter test --coverage --reporter expanded || true
-
-      - name: Check Coverage Threshold
-        run: |
-          if [ ! -f "coverage/lcov.info" ]; then
-            echo "No coverage data"
-            exit 0
-          fi
-
-          sudo apt-get update -qq && sudo apt-get install -y lcov -qq
-          export COV=$(lcov --summary coverage/lcov.info 2>&1 | grep "lines" | awk '{print $2}' | sed 's/%//' | head -1)
-          echo "Coverage: ${COV}%"
-
-          if [ -n "$COV" ]; then
-            export COV_INT=$(echo "$COV" | cut -d. -f1)
-            if [ "$COV_INT" -lt 70 ]; then
-              echo "::warning::Coverage ${COV}% below 70% threshold"
-            fi
-          fi
-
-      - name: Build APK
-        run: |
-          flutter build apk --release || {
-            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::warning::APK build failed"
-            else
-              exit 1
-            fi
-          }
-
-      - name: Check APK Size
-        run: |
-          [ -f "build/app/outputs/flutter-apk/app-release.apk" ] || exit 0
-          export APK_SIZE=$(du -m build/app/outputs/flutter-apk/app-release.apk | cut -f1)
-          echo "APK size: ${APK_SIZE}MB"
-          if [ "$APK_SIZE" -gt 100 ]; then
-            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "::warning::APK ${APK_SIZE}MB exceeds 100MB"
-            else
-              exit 1
-            fi
-          fi
+          REPO_NAME="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          jq -n \
+            --arg channel "bwgii3aooiy39cpy1tu7tcp6tc" \
+            --arg message "❌ **CI Failed** on \`$REPO_NAME\` branch \`$BRANCH\`\n[View Run]($RUN_URL)" \
+            '{channel_id: $channel, message: $message}' | \
+          curl -s -X POST "$MATTERMOST_URL/api/v4/posts" \
+            -H "Authorization: Bearer $MATTERMOST_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @-

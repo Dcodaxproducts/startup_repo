@@ -18,5 +18,7 @@ abstract class ApiClient {
 
   Future<ApiResult<Response>> put(String url, Map<String, dynamic> body, {Map<String, String>? headers});
 
+  Future<ApiResult<Response>> patch(String url, Map<String, dynamic> body, {Map<String, String>? headers});
+
   Future<ApiResult<Response>> delete(String url, {Map<String, String>? headers});
 }

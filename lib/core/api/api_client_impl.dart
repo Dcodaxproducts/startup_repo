@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:startup_repo/imports.dart';
@@ -59,18 +60,22 @@ class ApiClientImpl extends GetxService implements ApiClient {
       Response response;
 
       final requestHeaders = {..._mainHeaders, if (headers != null) ...headers};
+      final timeout = Duration(seconds: timeoutInSeconds);
       switch (method) {
         case 'GET':
-          response = await _client!.get(url, headers: requestHeaders);
+          response = await _client!.get(url, headers: requestHeaders).timeout(timeout);
           break;
         case 'POST':
-          response = await _client!.post(url, body: jsonEncode(body), headers: requestHeaders);
+          response = await _client!.post(url, body: jsonEncode(body), headers: requestHeaders).timeout(timeout);
           break;
         case 'PUT':
-          response = await _client!.put(url, body: jsonEncode(body), headers: requestHeaders);
+          response = await _client!.put(url, body: jsonEncode(body), headers: requestHeaders).timeout(timeout);
+          break;
+        case 'PATCH':
+          response = await _client!.patch(url, body: jsonEncode(body), headers: requestHeaders).timeout(timeout);
           break;
         case 'DELETE':
-          response = await _client!.delete(url, headers: requestHeaders);
+          response = await _client!.delete(url, headers: requestHeaders).timeout(timeout);
           break;
         default:
           throw UnsupportedError('HTTP method not supported');
@@ -108,6 +113,14 @@ class ApiClientImpl extends GetxService implements ApiClient {
       _request('PUT', uri, body: body, headers: headers);
 
   @override
+  Future<ApiResult<Response>> patch(
+    String uri,
+    Map<String, dynamic> body, {
+    Map<String, String>? headers,
+  }) =>
+      _request('PATCH', uri, body: body, headers: headers);
+
+  @override
   Future<ApiResult<Response>> delete(
     String uri, {
     Map<String, String>? headers,
@@ -140,6 +153,10 @@ class ApiClientImpl extends GetxService implements ApiClient {
   Failure<T> _handleException<T>(Object e) {
     if (e is SocketException) {
       const String message = 'Please check your internet connection';
+      AppDialog.showToast(message);
+      return const Failure(message);
+    } else if (e is TimeoutException) {
+      const String message = 'Request timed out. Please try again';
       AppDialog.showToast(message);
       return const Failure(message);
     } else {

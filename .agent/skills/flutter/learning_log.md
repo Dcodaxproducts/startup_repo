@@ -63,5 +63,7 @@ Developer: "No, we don't use Get.put() — always Get.lazyPut()"
 | 2026-03-05 | Enums | Move stable UI mapping logic into enums (example: `OrderStatus.deliveryStep`) to remove duplicated widget methods |
 | 2026-03-05 | Production cleanup | Remove TODO/dead commented paths from active flows; use working behavior or explicit safe fallback |
 | 2026-03-05 | File organization | Avoid over-fragmenting UI files; split for reuse/complexity, consolidate tiny single-use widgets |
+| 2026-03-11 | Widget structure | Keep each reusable widget in its own file; avoid inline/private widget builders in screen files |
+| 2026-03-11 | Widget API design | Prefer zero-argument widget constructors; only pass parameters when behavior or data truly requires it |
 
 <!-- Add new entries below this line -->
